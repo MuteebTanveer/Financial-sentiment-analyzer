@@ -1,7 +1,7 @@
-# ============================================
+
 # SENTIMENT ANALYSIS PIPELINE
 # Production version - called by FastAPI
-# ============================================
+
 
 import re
 import pandas as pd
@@ -22,10 +22,9 @@ analyzer   = SentimentIntensityAnalyzer()
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 
-# ============================================
 # STEP 1: CLEAN TEXT
 # Lowercase, remove URLs, symbols, whitespace
-# ============================================
+
 def clean_text(text):
     if pd.isna(text) or text is None:
         return ""
@@ -35,33 +34,28 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-# ============================================
+
 # STEP 2: TOKENIZE
 # Split text into individual words
-# ============================================
+
 def tokenize(text):
     return word_tokenize(text)
 
-# ============================================
 # STEP 3: REMOVE STOPWORDS
 # Remove words with no sentiment value
-# ============================================
+
 def remove_stopwords(tokens):
     return [w for w in tokens if w not in stop_words]
 
-# ============================================
 # STEP 4: LEMMATIZE
 # Reduce words to base form
-# surging → surge, crashed → crash
-# ============================================
 def lemmatize(tokens):
     return [lemmatizer.lemmatize(w) for w in tokens]
 
-# ============================================
+
 # MAIN PIPELINE FUNCTION
 # Called by FastAPI with asset + articles
 # Returns verdict + score
-# ============================================
 def run_sentiment_pipeline(asset, articles):
 
     # Load articles into DataFrame
