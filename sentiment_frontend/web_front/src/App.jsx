@@ -1,6 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import StoryField from './components/StoryField'
 import Headlines from './components/Headlines'
+import TraderPanel from './components/TraderPanel'
+import Posts from './components/Posts'
 import { API_BASE, PRESETS, money, signed, timeAgo, tone, verdictWord } from './lib/format'
 import './App.css'
 
@@ -14,54 +16,89 @@ function readUrl() {
   return { asset, period }
 }
 
+async function getJson(path) {
+  let res
+  try {
+    res = await fetch(`${API_BASE}${path}`)
+  } catch {
+    throw new Error("Can't reach the server. Check your connection and try again.")
+  }
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.detail || `The server answered with error ${res.status}.`)
+  return body
+}
+
+// One loader per data source, so news and trader data can fail separately.
+function useLoader() {
+  const [state, setState] = useState({ data: null, error: '', loading: false })
+  const req = useRef(0)
+  const load = useCallback(async (path) => {
+    const id = ++req.current
+    setState((s) => ({ ...s, loading: true, error: '' }))
+    try {
+      const data = await getJson(path)
+      if (id === req.current) setState({ data, error: '', loading: false })
+    } catch (e) {
+      if (id === req.current) setState((s) => ({ ...s, error: e.message, loading: false }))
+    }
+  }, [])
+  return [state, load]
+}
+
+function agreement(news, traders) {
+  if (!news || !traders) return null
+  const n = news.verdict
+  const t = traders.verdict
+  if (n === t) {
+    return n === 'NEUTRAL'
+      ? 'News and traders are both sitting on the fence.'
+      : `News and traders agree: both lean ${verdictWord(n).toLowerCase()}.`
+  }
+  if (n === 'NEUTRAL') return `The news is flat, but traders lean ${verdictWord(t).toLowerCase()}.`
+  if (t === 'NEUTRAL') return `The news leans ${verdictWord(n).toLowerCase()}, but traders aren't reacting yet.`
+  return `They disagree. The news reads ${verdictWord(n).toLowerCase()} while traders lean ${verdictWord(t).toLowerCase()}. Splits like this are worth watching.`
+}
+
 export default function App() {
   const initial = readUrl()
   const [asset, setAsset] = useState(initial.asset)
   const [period, setPeriod] = useState(initial.period)
   const [query, setQuery] = useState('')
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const [picked, setPicked] = useState(null)
-  const reqId = useRef(0)
+  const [feed, setFeed] = useState('traders')
+  const [news, loadNews] = useLoader()
+  const [traders, loadTraders] = useLoader()
 
-  const run = useCallback(async (sym, per) => {
-    const id = ++reqId.current
-    setLoading(true)
-    setError('')
-    setPicked(null)
+  const syncUrl = (sym, per) => {
     const url = new URL(window.location.href)
     url.searchParams.set('asset', sym)
     url.searchParams.set('period', per)
     window.history.replaceState(null, '', url)
-    try {
-      const res = await fetch(`${API_BASE}/api/analyze?asset=${encodeURIComponent(sym)}&period=${per}`)
-      const body = await res.json().catch(() => ({}))
-      if (id !== reqId.current) return
-      if (!res.ok) throw new Error(body.detail || `The server answered with error ${res.status}.`)
-      setData(body)
-    } catch (e) {
-      if (id !== reqId.current) return
-      setError(e.message === 'Failed to fetch' ? "Can't reach the server. Check your connection and try again." : e.message)
-    } finally {
-      if (id === reqId.current) setLoading(false)
-    }
-  }, [])
+  }
+
+  const runNews = useCallback((sym, per) => loadNews(`/api/analyze?asset=${encodeURIComponent(sym)}&period=${per}`), [loadNews])
+  const runTraders = useCallback((sym) => loadTraders(`/api/traders?asset=${encodeURIComponent(sym)}`), [loadTraders])
 
   useEffect(() => {
-    run(initial.asset, initial.period)
+    runNews(initial.asset, initial.period)
+    runTraders(initial.asset)
     // run once on load with whatever the URL asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function choose(sym) {
     setAsset(sym)
-    run(sym, period)
+    setPicked(null)
+    syncUrl(sym, period)
+    runNews(sym, period)
+    runTraders(sym)
   }
 
   function choosePeriod(per) {
     setPeriod(per)
-    run(asset, per)
+    setPicked(null)
+    syncUrl(asset, per)
+    runNews(asset, per)
   }
 
   function submitSearch(e) {
@@ -74,11 +111,19 @@ export default function App() {
 
   function pickStory(i) {
     setPicked(i)
-    document.getElementById(`story-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setFeed('news')
+    requestAnimationFrame(() =>
+      document.getElementById(`story-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+    )
   }
 
+  const n = news.data?.asset === asset ? news.data : null
+  const t = traders.data?.asset === asset ? traders.data : null
+  const name = n?.name || t?.name || PRESETS.find((p) => p.symbol === asset)?.name || asset
   const isCustom = !PRESETS.some((p) => p.symbol === asset)
-  const showing = data
+  const firstLoad = !n && !t && (news.loading || traders.loading)
+  const bothFailed = !n && !t && news.error && traders.error && !news.loading && !traders.loading
+  const price = n?.price
 
   return (
     <div className="page">
@@ -91,7 +136,7 @@ export default function App() {
           </svg>
           Market Mood
         </a>
-        <p className="tagline">How the news is leaning on a stock, coin or commodity, and which stories are doing the leaning.</p>
+        <p className="tagline">What the news says about a market, what traders are saying, and whether the two agree.</p>
       </header>
 
       <nav className="picker" aria-label="Choose an asset">
@@ -102,7 +147,6 @@ export default function App() {
               className={`chip ${asset === p.symbol ? 'is-on' : ''}`}
               aria-pressed={asset === p.symbol}
               onClick={() => choose(p.symbol)}
-              disabled={loading && asset === p.symbol}
             >
               <span className="chip-sym">{p.symbol}</span>
               <span className="chip-name">{p.name}</span>
@@ -111,7 +155,7 @@ export default function App() {
           {isCustom && (
             <button className="chip is-on" aria-pressed="true" onClick={() => choose(asset)}>
               <span className="chip-sym">{asset}</span>
-              <span className="chip-name">{data?.asset === asset ? data.name : 'Custom'}</span>
+              <span className="chip-name">{n?.name || t?.name || 'Custom'}</span>
             </button>
           )}
         </div>
@@ -133,8 +177,8 @@ export default function App() {
 
           <div className="period" role="radiogroup" aria-label="News window">
             {[
-              ['7d', 'Last 7 days'],
-              ['30d', 'Last 30 days'],
+              ['7d', 'News from 7 days'],
+              ['30d', 'News from 30 days'],
             ].map(([k, label]) => (
               <button key={k} role="radio" aria-checked={period === k} className={period === k ? 'is-on' : ''} onClick={() => choosePeriod(k)}>
                 {label}
@@ -144,121 +188,166 @@ export default function App() {
         </div>
       </nav>
 
-      <main aria-live="polite" aria-busy={loading}>
-        {error && !loading && (
+      <main aria-live="polite" aria-busy={news.loading || traders.loading}>
+        {bothFailed && (
           <div className="notice" role="alert">
-            <p>{error}</p>
-            <button onClick={() => run(asset, period)}>Try again</button>
+            <p>{news.error}</p>
+            <button onClick={() => choose(asset)}>Try again</button>
           </div>
         )}
 
-        {loading && !showing && <Skeleton />}
+        {firstLoad && <Skeleton />}
 
-        {showing && !error && (
-          <div className={`report ${loading ? 'is-stale' : ''}`}>
-            <section className={`verdict v-${tone(showing.score)}`} aria-labelledby="verdict-word">
-              <div className="verdict-top">
-                <div>
-                  <h1 className="asset-name">
-                    {showing.name} <span>{showing.asset}</span>
-                  </h1>
-                  {showing.price && (
-                    <p className="price">
-                      {money(showing.price.price)}{' '}
-                      {showing.price.change_pct !== null && (
-                        <span className={showing.price.change_pct >= 0 ? 't-bull' : 't-bear'}>
-                          {showing.price.change_pct >= 0 ? '+' : ''}
-                          {showing.price.change_pct.toFixed(2)}% today
-                        </span>
-                      )}
-                      {showing.price.note && <small> {showing.price.note}</small>}
-                    </p>
-                  )}
-                </div>
-                <p className="stamp">
-                  {loading ? 'Updating…' : `Updated ${timeAgo(showing.analyzed_at)}`}
-                </p>
-              </div>
-
-              <p id="verdict-word" className="verdict-word">
-                {verdictWord(showing.verdict)}
-                <span className="verdict-score">{signed(showing.score)}</span>
-              </p>
-              <p className="verdict-line">
-                Based on {showing.article_count} {showing.article_count === 1 ? 'story' : 'stories'} from the last{' '}
-                {showing.period === '30d' ? '30' : '7'} days, scored with {showing.model}.
-              </p>
-
-              <dl className="facts">
-                <div>
-                  <dt>Confidence</dt>
-                  <dd>
-                    <span className="meter" aria-hidden="true">
-                      <span style={{ width: `${showing.confidence}%` }} />
+        {(n || t) && (
+          <div className="report">
+            <div className="report-top">
+              <h1 className="asset-name">
+                {name} <span>{asset}</span>
+              </h1>
+              {price && (
+                <p className="price">
+                  {money(price.price)}{' '}
+                  {price.change_pct !== null && (
+                    <span className={price.change_pct >= 0 ? 't-bull' : 't-bear'}>
+                      {price.change_pct >= 0 ? '+' : ''}
+                      {price.change_pct.toFixed(2)}% today
                     </span>
-                    {showing.confidence_label}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Since last reading</dt>
-                  <dd>{showing.message}</dd>
-                </div>
-                <div>
-                  <dt>Mix of stories</dt>
-                  <dd>
-                    <span className="t-bull">{showing.breakdown.positive} positive</span>
-                    <span>{showing.breakdown.neutral} neutral</span>
-                    <span className="t-bear">{showing.breakdown.negative} negative</span>
-                  </dd>
-                </div>
-              </dl>
-            </section>
+                  )}
+                  {price.note && <small> {price.note}</small>}
+                </p>
+              )}
+            </div>
 
-            <StoryField articles={showing.articles} score={showing.score} onPick={pickStory} />
+            <section className="readings" aria-label="Sentiment readings">
+              <Reading
+                title="Traders"
+                data={t}
+                state={traders}
+                onRetry={() => runTraders(asset)}
+                detail={t && traderDetail(t)}
+              />
+              <Reading
+                title="News"
+                data={n}
+                state={news}
+                onRetry={() => runNews(asset, period)}
+                detail={
+                  n &&
+                  `${n.article_count} ${n.article_count === 1 ? 'story' : 'stories'} from the last ${n.period === '30d' ? 30 : 7} days, scored with ${n.model}. Confidence ${n.confidence_label.toLowerCase()}.`
+                }
+              />
+            </section>
+            {agreement(n, t) && <p className="agree">{agreement(n, t)}</p>}
+
+            {t && <TraderPanel data={t} />}
+
+            {n && (
+              <section className="news-block" aria-labelledby="news-field-title">
+                <h2 id="news-field-title">How the news is leaning</h2>
+                <p className="news-trend">{n.message}</p>
+                <StoryField articles={n.articles} score={n.score} onPick={pickStory} />
+              </section>
+            )}
 
             <div className="side-by-side">
               <section aria-labelledby="history-title">
                 <h2 id="history-title">Daily readings</h2>
                 <Suspense fallback={<p className="quiet">Loading chart…</p>}>
-                  <History history={showing.history} />
+                  <History news={n?.history || []} traders={t?.history || []} />
                 </Suspense>
               </section>
-              <section aria-labelledby="sources-title">
-                <h2 id="sources-title">By outlet</h2>
-                <ul className="outlets">
-                  {showing.sources.map((s) => (
-                    <li key={s.source}>
-                      <span className="outlet-name">{s.source}</span>
-                      <span className="outlet-bar" aria-hidden="true">
-                        <span
-                          className={`t-bg-${tone(s.score)}`}
-                          style={{
-                            left: s.score >= 0 ? '50%' : `${50 + s.score / 2}%`,
-                            width: `${Math.max(1.5, Math.abs(s.score) / 2)}%`,
-                          }}
-                        />
-                      </span>
-                      <span className="outlet-num">
-                        {signed(s.score)} <small>({s.count})</small>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              {n && (
+                <section aria-labelledby="sources-title">
+                  <h2 id="sources-title">News by outlet</h2>
+                  <ul className="outlets">
+                    {n.sources.map((s) => (
+                      <li key={s.source}>
+                        <span className="outlet-name">{s.source}</span>
+                        <span className="outlet-bar" aria-hidden="true">
+                          <span
+                            className={`t-bg-${tone(s.score)}`}
+                            style={{
+                              left: s.score >= 0 ? '50%' : `${50 + s.score / 2}%`,
+                              width: `${Math.max(1.5, Math.abs(s.score) / 2)}%`,
+                            }}
+                          />
+                        </span>
+                        <span className="outlet-num">
+                          {signed(s.score)} <small>({s.count})</small>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
 
-            <Headlines articles={showing.articles} breakdown={showing.breakdown} picked={picked} />
+            <section className="feed" aria-label="Posts and stories">
+              <div className="feed-tabs" role="tablist">
+                <button role="tab" aria-selected={feed === 'traders'} className={feed === 'traders' ? 'is-on' : ''} onClick={() => setFeed('traders')} disabled={!t?.posts?.length}>
+                  What traders are posting
+                </button>
+                <button role="tab" aria-selected={feed === 'news'} className={feed === 'news' ? 'is-on' : ''} onClick={() => setFeed('news')} disabled={!n}>
+                  News stories
+                </button>
+              </div>
+              {feed === 'traders' && t?.posts?.length > 0 && <Posts posts={t.posts} />}
+              {feed === 'traders' && t && !t.posts?.length && (
+                <p className="quiet">No trader posts came through for {name} right now. The trader reading uses positioning data instead.</p>
+              )}
+              {feed === 'news' && n && <Headlines articles={n.articles} breakdown={n.breakdown} picked={picked} />}
+            </section>
           </div>
         )}
       </main>
 
       <footer className="foot">
         <p>
-          Market Mood reads recent headlines and summaries, scores each one, and weights newer and
-          more widely reported stories higher. It measures how the coverage sounds, not where prices
-          will go. Nothing here is financial advice.
+          Trader mood blends what traders post on StockTwits and Reddit, how futures traders are
+          positioned, and the Crypto Fear and Greed Index. News mood scores recent headlines, giving
+          newer and widely reported stories more weight. Both describe sentiment, not where prices will
+          go. Nothing here is financial advice.
         </p>
       </footer>
+    </div>
+  )
+}
+
+function traderDetail(t) {
+  const bits = []
+  if (t.crowd) bits.push(`${t.crowd.posts} recent posts`)
+  if (t.positioning) bits.push(`${Math.round(t.positioning.long_pct)}% of futures traders long`)
+  if (t.fear_greed) bits.push(`Fear and Greed at ${t.fear_greed.value}`)
+  return bits.join(', ') + '.'
+}
+
+function Reading({ title, data, state, onRetry, detail }) {
+  if (!data) {
+    return (
+      <div className="reading reading-empty">
+        <h2>{title}</h2>
+        {state.loading ? (
+          <p className="quiet">Reading the {title.toLowerCase()}…</p>
+        ) : (
+          <>
+            <p className="quiet">{state.error || 'Nothing to show yet.'}</p>
+            {state.error && <button className="text-btn" onClick={onRetry}>Try again</button>}
+          </>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className={`reading v-${tone(data.score)} ${state.loading ? 'is-stale' : ''}`}>
+      <h2>
+        {title}
+        <span className="stamp">{state.loading ? 'Updating…' : `updated ${timeAgo(data.analyzed_at)}`}</span>
+      </h2>
+      <p className="verdict-word">
+        {verdictWord(data.verdict)}
+        <span className="verdict-score">{signed(data.score)}</span>
+      </p>
+      <p className="verdict-line">{detail}</p>
     </div>
   )
 }
@@ -267,8 +356,10 @@ function Skeleton() {
   return (
     <div className="skeleton" aria-label="Loading">
       <span style={{ width: '30%' }} />
-      <span className="big" style={{ width: '55%' }} />
-      <span style={{ width: '70%' }} />
+      <div className="skeleton-row">
+        <span className="big" />
+        <span className="big" />
+      </div>
       <span className="block" />
     </div>
   )

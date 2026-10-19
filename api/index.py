@@ -16,12 +16,13 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, Query, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from _core import news, sentiment  # noqa: E402
+from _core import news, sentiment, traders  # noqa: E402
 from _core.assets import PRESETS, SYMBOL_RE, build_custom  # noqa: E402
 from _core.store import make_store, trend_from_history  # noqa: E402
 
 PERIODS = {"7d": 7, "30d": 30}
 CACHE_AGE = timedelta(minutes=int(os.getenv("CACHE_MINUTES", "120")))
+TRADER_AGE = timedelta(minutes=int(os.getenv("TRADER_CACHE_MINUTES", "30")))
 FRESH_LIMIT = int(os.getenv("RATE_LIMIT_PER_MINUTE", "8"))  # new analyses per IP per minute
 
 app = FastAPI(title="Market Mood API", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -127,19 +128,64 @@ def run_analysis(symbol, asset, period):
 
 
 @app.get("/api/health")
-def health():
+def health(request: Request, probe: bool = False):
     store()
-    return {
+    out = {
         "ok": True,
         "model": sentiment.model_name(),
         "database": _db_ok,
         "sources": news.enabled_sources(),
+        "reddit": bool(os.getenv("REDDIT_CLIENT_ID")),
+        "region": os.getenv("VERCEL_REGION"),
     }
+    if probe:  # checks which trader data sources this server can reach
+        check_rate(client_ip(request))
+        btc = PRESETS["BTC"]
+        checks = {}
+        for name, fn in traders.EXCHANGES:
+            try:
+                fn("BTC")
+                checks[name] = "ok"
+            except Exception as exc:
+                checks[name] = traders._reason(exc)
+        for name, fn in [("StockTwits", traders.fetch_stocktwits), ("Fear & Greed", traders.fear_greed)]:
+            try:
+                got = fn(btc)
+                checks[name] = "ok" if got and got[0] else "empty"
+            except Exception as exc:
+                checks[name] = traders._reason(exc)
+        out["probe"] = checks
+    return out
 
 
 @app.get("/api/assets")
 def assets():
     return [{"symbol": k, "name": v["name"], "kind": v["kind"]} for k, v in PRESETS.items()]
+
+
+def check_symbol(asset):
+    symbol = asset.upper().strip().lstrip("$")
+    if not SYMBOL_RE.match(symbol):
+        raise HTTPException(400, "Use a ticker symbol made of letters and numbers, like AAPL.")
+    return symbol
+
+
+@app.get("/api/traders")
+def trader_mood(request: Request, asset: str = Query(..., min_length=1, max_length=10)):
+    symbol = check_symbol(asset)
+    db = store()
+    payload = db.get_fresh(symbol, "traders", TRADER_AGE)
+    cached = payload is not None
+    if not cached:
+        check_rate(client_ip(request))
+        asset_cfg = resolve_asset(symbol)
+        payload, errors = traders.analyze(asset_cfg)
+        if payload is None:
+            raise HTTPException(503, f"Trader data for {asset_cfg['name']} isn't reachable right now. Try again later.")
+        payload.update(asset=symbol, name=asset_cfg["name"], kind=asset_cfg["kind"], confidence=0)
+        db.save(symbol, "traders", payload)
+    history = db.history(symbol, "traders", 30)
+    return {**payload, "cached": cached, "history": history}
 
 
 @app.get("/api/analyze")
@@ -148,9 +194,7 @@ def analyze(
     asset: str = Query(..., min_length=1, max_length=10),
     period: str = Query("7d"),
 ):
-    symbol = asset.upper().strip().lstrip("$")
-    if not SYMBOL_RE.match(symbol):
-        raise HTTPException(400, "Use a ticker symbol made of letters and numbers, like AAPL.")
+    symbol = check_symbol(asset)
     if period not in PERIODS:
         raise HTTPException(400, "Period must be 7d or 30d.")
     if not news.enabled_sources():

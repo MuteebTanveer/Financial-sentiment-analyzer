@@ -1,11 +1,22 @@
 # Market Mood
 
-A financial news sentiment analyzer. Pick a coin, commodity or any US stock, and it reads the
-latest news, scores every story, and tells you whether coverage leans bullish, bearish or
-neutral. It also shows which stories drive the score, how confident it is, and how the mood has
-moved day by day.
+A market sentiment analyzer with two readings side by side: what traders are saying and how
+they are positioned, and how the news is covering the same market. Pick a coin, commodity or any
+US stock and it shows both, whether they agree, which posts and stories drive each score, and
+how the mood has moved day by day.
 
-## How the score works
+## Trader mood
+
+- What traders post: recent StockTwits messages, where many authors tag their own post as
+  Bullish or Bearish, plus Reddit posts if you add Reddit API keys. Untagged posts are scored
+  with VADER plus trader slang ("rekt", "moon", "ngmi" and so on). Liked posts count more.
+- Futures positioning (crypto): the share of futures accounts that are long, from Binance, with
+  OKX, Bybit and Gate as fallbacks.
+- Fear and Greed (crypto): the daily Crypto Fear and Greed Index.
+
+The three are blended into one score. Stocks only have the posts part.
+
+## News mood
 
 1. News comes from Finnhub, GNews and NewsAPI (whichever keys you set).
 2. Only stories that actually name the asset are kept, matched as whole words, so "eth" never
@@ -43,7 +54,11 @@ Without `DATABASE_URL` it keeps results in memory, which is fine for local use.
    - `HF_API_TOKEN` (recommended for accuracy, free read token at huggingface.co)
    - `DATABASE_URL` for history: add the Neon integration from the Vercel Storage tab and it
      sets `POSTGRES_URL` for you. The table is created on first run.
+   - `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` (optional, needs an approved Reddit app)
 3. Deploy. The site and the API share one domain, so no CORS setup is needed.
+
+The functions run in Frankfurt (`regions` in `vercel.json`) because Binance blocks US servers.
+Open `/api/health?probe=1` to see which trader data sources the server can reach.
 
 NewsAPI's free plan only allows development use, so leave `NEWS_API_KEY` empty on the public
 site unless you have a paid plan.

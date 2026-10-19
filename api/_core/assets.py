@@ -6,29 +6,31 @@ import re
 # query: what we send to the news search APIs
 # company: symbol for Finnhub company news (stocks only)
 # quote: symbol for the Finnhub price quote (ETFs stand in for gold, oil, S&P)
+# perp: base coin for futures positioning data (crypto only)
+# twits: StockTwits symbol, subs: subreddits where traders discuss it
 PRESETS = {
     "BTC":  {"name": "Bitcoin",  "kind": "crypto", "query": "bitcoin",
-             "terms": ["bitcoin", "btc"], "quote": "BINANCE:BTCUSDT"},
+             "terms": ["bitcoin", "btc"], "quote": "BINANCE:BTCUSDT", "perp": "BTC", "twits": "BTC.X", "subs": ["Bitcoin", "CryptoCurrency", "BitcoinMarkets"]},
     "ETH":  {"name": "Ethereum", "kind": "crypto", "query": "ethereum",
-             "terms": ["ethereum", "ether", "eth"], "quote": "BINANCE:ETHUSDT"},
+             "terms": ["ethereum", "ether", "eth"], "quote": "BINANCE:ETHUSDT", "perp": "ETH", "twits": "ETH.X", "subs": ["ethtrader", "ethereum", "CryptoCurrency"]},
     "SOL":  {"name": "Solana",   "kind": "crypto", "query": "solana",
-             "terms": ["solana"], "quote": "BINANCE:SOLUSDT"},
+             "terms": ["solana"], "quote": "BINANCE:SOLUSDT", "perp": "SOL", "twits": "SOL.X", "subs": ["solana", "CryptoCurrency"]},
     "DOGE": {"name": "Dogecoin", "kind": "crypto", "query": "dogecoin",
-             "terms": ["dogecoin", "doge"], "quote": "BINANCE:DOGEUSDT"},
+             "terms": ["dogecoin", "doge"], "quote": "BINANCE:DOGEUSDT", "perp": "DOGE", "twits": "DOGE.X", "subs": ["dogecoin", "CryptoCurrency"]},
     "GOLD": {"name": "Gold",     "kind": "commodity", "query": "gold price",
-             "terms": ["gold", "bullion"], "quote": "GLD", "quote_note": "via GLD ETF"},
+             "terms": ["gold", "bullion"], "quote": "GLD", "quote_note": "via GLD ETF", "twits": "GLD", "subs": ["Gold", "investing", "Silverbugs"]},
     "OIL":  {"name": "Crude oil", "kind": "commodity", "query": "crude oil",
              "terms": ["oil", "crude", "brent", "wti", "opec"], "quote": "USO",
-             "quote_note": "via USO ETF"},
+             "quote_note": "via USO ETF", "twits": "USO", "subs": ["oil", "investing", "stocks"]},
     "AAPL": {"name": "Apple",    "kind": "stock", "query": "Apple stock",
-             "terms": ["apple", "aapl", "iphone"], "company": "AAPL", "quote": "AAPL"},
+             "terms": ["apple", "aapl", "iphone"], "company": "AAPL", "quote": "AAPL", "twits": "AAPL", "subs": ["wallstreetbets", "stocks", "apple"]},
     "NVDA": {"name": "Nvidia",   "kind": "stock", "query": "Nvidia",
-             "terms": ["nvidia", "nvda"], "company": "NVDA", "quote": "NVDA"},
+             "terms": ["nvidia", "nvda"], "company": "NVDA", "quote": "NVDA", "twits": "NVDA", "subs": ["wallstreetbets", "stocks", "NVDA_Stock"]},
     "TSLA": {"name": "Tesla",    "kind": "stock", "query": "Tesla stock",
-             "terms": ["tesla", "tsla"], "company": "TSLA", "quote": "TSLA"},
+             "terms": ["tesla", "tsla"], "company": "TSLA", "quote": "TSLA", "twits": "TSLA", "subs": ["wallstreetbets", "stocks", "teslainvestorsclub"]},
     "SPX":  {"name": "S&P 500",  "kind": "index", "query": "S&P 500",
              "terms": ["s&p 500", "s&p500", "sp500", "wall street", "stocks"],
-             "quote": "SPY", "quote_note": "via SPY ETF"},
+             "quote": "SPY", "quote_note": "via SPY ETF", "twits": "SPY", "subs": ["wallstreetbets", "stocks", "StockMarket"]},
 }
 
 SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
@@ -59,6 +61,8 @@ def build_custom(symbol, profile):
         "terms": terms,
         "company": symbol,
         "quote": symbol,
+        "twits": symbol,
+        "subs": ["wallstreetbets", "stocks", "investing"],
     }
 
 

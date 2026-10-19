@@ -163,7 +163,7 @@
   flex-wrap: wrap;
   gap: 0 0.3em;
   margin-top: 6px;
-  font-size: clamp(4rem, 15vw, 9.5rem);
+  font-size: clamp(3.4rem, 10vw, 6.75rem);
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: -0.045em;
@@ -202,6 +202,112 @@
   overflow: hidden;
 }
 .meter span { display: block; height: 100%; background: var(--ink); border-radius: 3px; }
+
+/* two readings */
+.report-top { margin-bottom: 18px; }
+.report.is-stale { opacity: 1; pointer-events: auto; }
+.readings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-top: 2px solid var(--ink);
+}
+.reading {
+  padding: 14px 24px 18px 0;
+  transition: opacity 0.2s;
+}
+.reading + .reading {
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+.reading.is-stale { opacity: 0.55; }
+.reading h2 {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 1rem;
+}
+.reading h2 .stamp { font-weight: 400; padding: 0; }
+.v-bull .verdict-word { color: var(--bull); }
+.v-bear .verdict-word { color: var(--bear); }
+.v-flat .verdict-word { color: var(--flat); }
+.reading .verdict-line { font-size: 0.95rem; margin-top: 8px; }
+.reading-empty { min-height: 180px; }
+.reading-empty .quiet { margin-top: 12px; }
+.text-btn {
+  margin-top: 8px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--focus);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.agree {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+
+/* trader panel */
+.trader-panel { margin-top: 36px; }
+.tp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.tp-block {
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.tp-block h3 { margin: 0 0 10px; font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.fg-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; margin-bottom: 10px; }
+.fg-value span { font-size: 0.95rem; font-weight: 500; color: var(--muted); }
+.split {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 2px;
+}
+.split-long { background: var(--bull); }
+.split-short { background: var(--bear); }
+.split-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  margin-top: 5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.fg-scale {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--bear), var(--flat), var(--bull));
+}
+.fg-mark {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 20px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.tp-note { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
+
+.news-block { margin-top: 44px; }
+.news-block h2 { margin-bottom: 2px; }
+.news-trend { color: var(--muted); font-size: 0.9rem; }
+.news-block .field { margin-top: 12px; }
 
 /* story field: the centrepiece */
 .field {
@@ -285,7 +391,20 @@ h2 {
 .quiet { color: var(--muted); max-width: 46ch; }
 
 .history-chart .recharts-cartesian-axis-tick-value { fill: var(--muted); font-size: 11px; }
-.history-line .recharts-line-curve { stroke: var(--ink); stroke-width: 2; }
+.history-line .recharts-line-curve { stroke-width: 2; }
+.line-traders .recharts-line-curve { stroke: var(--ink); }
+.line-news .recharts-line-curve { stroke: var(--muted); stroke-dasharray: 5 4; }
+.line-news .recharts-dot { stroke: var(--muted) !important; }
+.legend { display: flex; gap: 16px; font-size: 0.85rem; margin-bottom: 4px; color: var(--muted); }
+.legend span::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 2px solid var(--ink);
+}
+.lg-news::before { border-top-style: dashed !important; border-color: var(--muted) !important; }
 .history-line .recharts-dot,
 .history-line .recharts-active-dot circle { fill: var(--surface); stroke: var(--ink); }
 .zero-line line { stroke: var(--line); }
@@ -325,6 +444,38 @@ h2 {
 .outlet-bar span { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
 .outlet-num { text-align: right; min-width: 4.5rem; font-weight: 600; }
 .outlet-num small { color: var(--muted); font-weight: 400; }
+
+/* feed */
+.feed { margin-top: 44px; }
+.feed-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.feed-tabs button {
+  border: 0;
+  background: none;
+  padding: 10px 4px;
+  margin-right: 18px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.feed-tabs button.is-on { color: var(--ink); border-bottom-color: var(--ink); }
+.feed-tabs button:disabled { opacity: 0.4; cursor: default; }
+.filters-right { justify-content: flex-end; margin-bottom: 4px; }
+.post-text {
+  text-decoration: none;
+  line-height: 1.45;
+  max-width: 72ch;
+  display: inline-block;
+  overflow-wrap: anywhere;
+}
+.post-text:hover { text-decoration: underline; text-underline-offset: 3px; }
+.feed .headlines { margin-top: 0; }
 
 /* headlines */
 .headlines { margin-top: 44px; }
@@ -405,7 +556,8 @@ h2 {
   background: var(--soft);
   animation: pulse 1.4s ease-in-out infinite;
 }
-.skeleton .big { height: 110px; }
+.skeleton .big { height: 150px; }
+.skeleton-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .skeleton .block { height: 200px; margin-top: 20px; }
 @keyframes pulse {
   50% { opacity: 0.5; }
@@ -423,6 +575,10 @@ h2 {
 @media (max-width: 720px) {
   .page { padding-top: 20px; }
   .facts { grid-template-columns: 1fr; gap: 12px; }
+  .readings { grid-template-columns: 1fr; }
+  .reading { padding-right: 0; }
+  .reading + .reading { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
+  .skeleton-row { grid-template-columns: 1fr; }
   .side-by-side { grid-template-columns: 1fr; }
   .field { padding: 16px 12px 10px; }
   .story-list li { grid-template-columns: 2.75rem 1fr; gap: 10px; padding: 12px 4px; }

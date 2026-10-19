@@ -17,7 +17,7 @@ export default function Headlines({ articles, breakdown, picked }) {
   return (
     <section className="headlines" aria-labelledby="headlines-title">
       <div className="section-head">
-        <h2 id="headlines-title">The stories behind the score</h2>
+        <h2 id="headlines-title" className="sr-only">News stories</h2>
         <div className="filters" role="tablist" aria-label="Filter stories">
           {FILTERS.map((f) => (
             <button
