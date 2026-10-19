@@ -1,338 +1,275 @@
-import { useState } from "react"
-import axios from "axios"
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import StoryField from './components/StoryField'
+import Headlines from './components/Headlines'
+import { API_BASE, PRESETS, money, signed, timeAgo, tone, verdictWord } from './lib/format'
+import './App.css'
 
-const ASSETS = [
-  { label: "Bitcoin",  value: "BTC",  icon: "₿" },
-  { label: "Ethereum", value: "ETH",  icon: "Ξ" },
-  { label: "Solana",   value: "SOL",  icon: "◎" },
-  { label: "Dogecoin", value: "DOGE", icon: "Ð" },
-  { label: "Gold",     value: "GOLD", icon: "Au" },
-  { label: "Oil",      value: "OIL",  icon: "🛢" },
-  { label: "Apple",    value: "AAPL", icon: "🍎" },
-  { label: "Nvidia",   value: "NVDA", icon: "🟢" },
-  { label: "Tesla",    value: "TSLA", icon: "⚡" },
-  { label: "S&P 500",  value: "SPX",  icon: "📈" },
-]
+// the chart library is large, so load it after the first paint
+const History = lazy(() => import('./components/History'))
 
-const VERDICT_CONFIG = {
-  BULLISH: {
-    color: "#00b84d", // Deeper green for readability on white
-    bg: "#ebffed",
-    border: "#b2f2bb",
-    icon: "↑",
-    label: "BULLISH"
-  },
-  BEARISH: {
-    color: "#e63946", // Sharp red
-    bg: "#fff0f1",
-    border: "#ffc9c9",
-    icon: "↓",
-    label: "BEARISH"
-  },
-  NEUTRAL: {
-    color: "#f59f00", // Stronger amber
-    bg: "#fff9db",
-    border: "#ffe066",
-    icon: "→",
-    label: "NEUTRAL"
-  },
-}
-
-const TREND_CONFIG = {
-  IMPROVING: { color: "#00b84d", icon: "↑" },
-  DECLINING: { color: "#e63946", icon: "↓" },
-  STABLE:    { color: "#f59f00", icon: "→" },
-  NEW:       { color: "#495057", icon: "★" },
-}
-
-function ScoreGauge({ score }) {
-  const pct   = ((score + 100) / 200) * 100
-  const color = score > 5 ? "#00b84d" : score < -5 ? "#e63946" : "#f59f00"
-  return (
-    <div style={{ margin: "24px 0" }}>
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 11,
-        color: "#868e96",
-        marginBottom: 8,
-        fontWeight: 600
-      }}>
-        <span>BEARISH</span>
-        <span style={{ color, fontWeight: 900, fontSize: 24, fontFamily: "monospace" }}>
-          {score > 0 ? "+" : ""}{score}
-        </span>
-        <span>BULLISH</span>
-      </div>
-      <div style={{
-        height: 10,
-        background: "#f1f3f5",
-        borderRadius: 5,
-        position: "relative",
-        boxShadow: "inset 0 1px 3px rgba(0,0,0,0.05)"
-      }}>
-        <div style={{
-          position: "absolute",
-          left: 0, top: 0,
-          height: "100%",
-          width: `${pct}%`,
-          background: `linear-gradient(90deg, #e63946, #f59f00, #00b84d)`,
-          borderRadius: 5,
-          transition: "width 1.2s cubic-bezier(.4,0,.2,1)"
-        }} />
-        <div style={{
-          position: "absolute",
-          top: "50%",
-          left: `${pct}%`,
-          transform: "translate(-50%, -50%)",
-          width: 20,
-          height: 20,
-          borderRadius: "50%",
-          background: "#fff",
-          border: `4px solid ${color}`,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          transition: "left 1.2s cubic-bezier(.4,0,.2,1)"
-        }} />
-      </div>
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        marginTop: 6,
-        fontSize: 10,
-        color: "#adb5bd",
-        fontWeight: 600
-      }}>
-        <span>-100</span>
-        <span>0</span>
-        <span>+100</span>
-      </div>
-    </div>
-  )
-}
-
-function ComparisonCard({ label, score, color, isToday }) {
-  return (
-    <div style={{
-      flex: 1,
-      padding: "16px",
-      background: isToday ? "#ffffff" : "#f8f9fa",
-      border: `2px solid ${isToday ? color : "#e9ecef"}`,
-      borderRadius: 16,
-      textAlign: "center",
-      boxShadow: isToday ? "0 4px 12px rgba(0,0,0,0.05)" : "none"
-    }}>
-      <div style={{ fontSize: 10, color: "#868e96", fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 900, color: isToday ? color : "#adb5bd", fontFamily: "monospace" }}>
-        {score !== null && score !== undefined ? `${score > 0 ? "+" : ""}${score}` : "—"}
-      </div>
-    </div>
-  )
+function readUrl() {
+  const p = new URLSearchParams(window.location.search)
+  const asset = (p.get('asset') || 'BTC').toUpperCase()
+  const period = p.get('period') === '30d' ? '30d' : '7d'
+  return { asset, period }
 }
 
 export default function App() {
-  const [asset,   setAsset]   = useState("BTC")
-  const [result,  setResult]  = useState(null)
+  const initial = readUrl()
+  const [asset, setAsset] = useState(initial.asset)
+  const [period, setPeriod] = useState(initial.period)
+  const [query, setQuery] = useState('')
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState("")
+  const [error, setError] = useState('')
+  const [picked, setPicked] = useState(null)
+  const reqId = useRef(0)
 
-  async function analyze() {
+  const run = useCallback(async (sym, per) => {
+    const id = ++reqId.current
     setLoading(true)
-    setError("")
-    setResult(null)
+    setError('')
+    setPicked(null)
+    const url = new URL(window.location.href)
+    url.searchParams.set('asset', sym)
+    url.searchParams.set('period', per)
+    window.history.replaceState(null, '', url)
     try {
-      const res = await axios.get(`http://127.0.0.1:8001/analyze?asset=${asset}&period=7d`)
-      setResult(res.data)
+      const res = await fetch(`${API_BASE}/api/analyze?asset=${encodeURIComponent(sym)}&period=${per}`)
+      const body = await res.json().catch(() => ({}))
+      if (id !== reqId.current) return
+      if (!res.ok) throw new Error(body.detail || `The server answered with error ${res.status}.`)
+      setData(body)
     } catch (e) {
-      setError("Failed to connect. Make sure backend is running!")
+      if (id !== reqId.current) return
+      setError(e.message === 'Failed to fetch' ? "Can't reach the server. Check your connection and try again." : e.message)
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
+  }, [])
+
+  useEffect(() => {
+    run(initial.asset, initial.period)
+    // run once on load with whatever the URL asked for
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function choose(sym) {
+    setAsset(sym)
+    run(sym, period)
   }
 
-  const cfg = result ? VERDICT_CONFIG[result.verdict] : null
-  const trendCfg = result ? TREND_CONFIG[result.trend] || TREND_CONFIG.NEW : null
-  const assetInfo = ASSETS.find(a => a.value === asset)
+  function choosePeriod(per) {
+    setPeriod(per)
+    run(asset, per)
+  }
+
+  function submitSearch(e) {
+    e.preventDefault()
+    const sym = query.trim().toUpperCase().replace(/^\$/, '')
+    if (!sym) return
+    setQuery('')
+    choose(sym)
+  }
+
+  function pickStory(i) {
+    setPicked(i)
+    document.getElementById(`story-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  const isCustom = !PRESETS.some((p) => p.symbol === asset)
+  const showing = data
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#fdfdfd",
-      backgroundImage: "radial-gradient(#e5e7eb 1px, transparent 1px)",
-      backgroundSize: "24px 24px",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: "48px 16px",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-      color: "#212529"
-    }}>
+    <div className="page">
+      <header className="masthead">
+        <a className="wordmark" href="/" aria-label="Market Mood home">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="9" cy="20" r="3" className="m-bear" />
+            <circle cx="16" cy="16" r="3.6" className="m-flat" />
+            <circle cx="23" cy="11" r="4.2" className="m-bull" />
+          </svg>
+          Market Mood
+        </a>
+        <p className="tagline">How the news is leaning on a stock, coin or commodity, and which stories are doing the leaning.</p>
+      </header>
 
-      <div style={{ width: "100%", maxWidth: 480 }}>
-
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <div style={{
-            display: "inline-block",
-            padding: "6px 16px",
-            background: "#212529",
-            borderRadius: 30,
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: "0.15em",
-            color: "#fff",
-            marginBottom: 16
-          }}>
-            MARKET INTELLIGENCE
-          </div>
-          <h1 style={{ fontSize: 44, fontWeight: 900, color: "#1a1a1a", letterSpacing: "-0.04em" }}>
-            Sentiment<span style={{ color: "#00b84d" }}>AI</span>
-          </h1>
-          <p style={{ color: "#868e96", fontSize: 13, fontWeight: 500 }}>
-            Fresh daily insights from global news sources
-          </p>
-        </div>
-
-        {/* Asset Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gap: 10,
-          marginBottom: 20
-        }}>
-          {ASSETS.map(a => (
-            <button key={a.value} onClick={() => setAsset(a.value)}
-              style={{
-                padding: "12px 4px",
-                background: asset === a.value ? "#212529" : "#fff",
-                border: "1px solid #dee2e6",
-                borderRadius: 12,
-                color: asset === a.value ? "#fff" : "#495057",
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: "pointer",
-                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 4,
-                boxShadow: asset === a.value ? "0 4px 12px rgba(0,0,0,0.15)" : "0 2px 4px rgba(0,0,0,0.02)"
-              }}>
-              <span style={{ fontSize: 18 }}>{a.icon}</span>
-              <span>{a.value}</span>
+      <nav className="picker" aria-label="Choose an asset">
+        <div className="chips">
+          {PRESETS.map((p) => (
+            <button
+              key={p.symbol}
+              className={`chip ${asset === p.symbol ? 'is-on' : ''}`}
+              aria-pressed={asset === p.symbol}
+              onClick={() => choose(p.symbol)}
+              disabled={loading && asset === p.symbol}
+            >
+              <span className="chip-sym">{p.symbol}</span>
+              <span className="chip-name">{p.name}</span>
             </button>
           ))}
+          {isCustom && (
+            <button className="chip is-on" aria-pressed="true" onClick={() => choose(asset)}>
+              <span className="chip-sym">{asset}</span>
+              <span className="chip-name">{data?.asset === asset ? data.name : 'Custom'}</span>
+            </button>
+          )}
         </div>
 
-        {/* Analyze Button */}
-        <button onClick={analyze} disabled={loading}
-          style={{
-            width: "100%",
-            padding: "18px",
-            background: loading ? "#e9ecef" : "#212529",
-            color: loading ? "#adb5bd" : "#fff",
-            border: "none",
-            borderRadius: 16,
-            fontSize: 14,
-            fontWeight: 800,
-            letterSpacing: "0.05em",
-            cursor: loading ? "not-allowed" : "pointer",
-            marginBottom: 24,
-            transition: "transform 0.1s active",
-            boxShadow: "0 10px 20px rgba(0,0,0,0.1)"
-          }}>
-          {loading ? "PROCESSING DATA..." : `RUN ANALYSIS ON ${assetInfo?.label.toUpperCase()}`}
-        </button>
+        <div className="picker-row">
+          <form className="search" onSubmit={submitSearch} role="search">
+            <label htmlFor="ticker" className="sr-only">Any US stock ticker</label>
+            <input
+              id="ticker"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Any US stock, like MSFT"
+              maxLength={10}
+              autoComplete="off"
+              spellCheck="false"
+            />
+            <button type="submit">Analyze</button>
+          </form>
 
-        {/* Error */}
-        {error && (
-          <div style={{
-            padding: "16px",
-            background: "#fff0f1",
-            border: "1px solid #ffc9c9",
-            borderRadius: 12,
-            color: "#e63946",
-            fontSize: 13,
-            fontWeight: 600,
-            marginBottom: 16,
-            textAlign: "center"
-          }}>
-            {error}
+          <div className="period" role="radiogroup" aria-label="News window">
+            {[
+              ['7d', 'Last 7 days'],
+              ['30d', 'Last 30 days'],
+            ].map(([k, label]) => (
+              <button key={k} role="radio" aria-checked={period === k} className={period === k ? 'is-on' : ''} onClick={() => choosePeriod(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </nav>
+
+      <main aria-live="polite" aria-busy={loading}>
+        {error && !loading && (
+          <div className="notice" role="alert">
+            <p>{error}</p>
+            <button onClick={() => run(asset, period)}>Try again</button>
           </div>
         )}
 
-        {/* Result Card */}
-        {result && cfg && (
-          <div style={{
-            background: "#fff",
-            border: `1px solid #e9ecef`,
-            borderRadius: 28,
-            padding: 32,
-            boxShadow: "0 20px 40px rgba(0,0,0,0.06)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-              <div style={{ fontSize: 12, color: "#868e96", fontWeight: 700 }}>
-                {assetInfo?.icon} {result.asset} ASSET REPORT
-              </div>
-              <div style={{
-                padding: "4px 10px",
-                background: "#f8f9fa",
-                borderRadius: 6,
-                fontSize: 10,
-                fontWeight: 800,
-                color: "#495057",
-                border: "1px solid #e9ecef"
-              }}>
-                {result.source === "cache" ? "● CACHED" : "● LIVE DATA"}
-              </div>
-            </div>
+        {loading && !showing && <Skeleton />}
 
-            <div style={{ textAlign: "center", marginBottom: 8 }}>
-              <div style={{
-                fontSize: 64,
-                fontWeight: 900,
-                color: cfg.color,
-                lineHeight: 1,
-              }}>
-                {cfg.label}
-              </div>
-            </div>
-
-            <ScoreGauge score={result.score} />
-
-            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-              <ComparisonCard label="PREVIOUS" score={result.yesterday_score} color={cfg.color} isToday={false} />
-              <ComparisonCard label="CURRENT" score={result.score} color={cfg.color} isToday={true} />
-            </div>
-
-            {trendCfg && (
-              <div style={{
-                marginTop: 20,
-                padding: "16px",
-                background: cfg.bg,
-                borderRadius: 16,
-                border: `1px solid ${cfg.border}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 14
-              }}>
-                <span style={{ fontSize: 24, color: trendCfg.color }}>{trendCfg.icon}</span>
+        {showing && !error && (
+          <div className={`report ${loading ? 'is-stale' : ''}`}>
+            <section className={`verdict v-${tone(showing.score)}`} aria-labelledby="verdict-word">
+              <div className="verdict-top">
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 900, color: trendCfg.color, textTransform: "uppercase" }}>
-                    {result.trend} TREND
-                  </div>
-                  <div style={{ fontSize: 13, color: "#495057", fontWeight: 500, marginTop: 2, lineHeight: 1.4 }}>
-                    {result.trend_message}
-                  </div>
+                  <h1 className="asset-name">
+                    {showing.name} <span>{showing.asset}</span>
+                  </h1>
+                  {showing.price && (
+                    <p className="price">
+                      {money(showing.price.price)}{' '}
+                      {showing.price.change_pct !== null && (
+                        <span className={showing.price.change_pct >= 0 ? 't-bull' : 't-bear'}>
+                          {showing.price.change_pct >= 0 ? '+' : ''}
+                          {showing.price.change_pct.toFixed(2)}% today
+                        </span>
+                      )}
+                      {showing.price.note && <small> {showing.price.note}</small>}
+                    </p>
+                  )}
                 </div>
+                <p className="stamp">
+                  {loading ? 'Updating…' : `Updated ${timeAgo(showing.analyzed_at)}`}
+                </p>
               </div>
-            )}
+
+              <p id="verdict-word" className="verdict-word">
+                {verdictWord(showing.verdict)}
+                <span className="verdict-score">{signed(showing.score)}</span>
+              </p>
+              <p className="verdict-line">
+                Based on {showing.article_count} {showing.article_count === 1 ? 'story' : 'stories'} from the last{' '}
+                {showing.period === '30d' ? '30' : '7'} days, scored with {showing.model}.
+              </p>
+
+              <dl className="facts">
+                <div>
+                  <dt>Confidence</dt>
+                  <dd>
+                    <span className="meter" aria-hidden="true">
+                      <span style={{ width: `${showing.confidence}%` }} />
+                    </span>
+                    {showing.confidence_label}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Since last reading</dt>
+                  <dd>{showing.message}</dd>
+                </div>
+                <div>
+                  <dt>Mix of stories</dt>
+                  <dd>
+                    <span className="t-bull">{showing.breakdown.positive} positive</span>
+                    <span>{showing.breakdown.neutral} neutral</span>
+                    <span className="t-bear">{showing.breakdown.negative} negative</span>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <StoryField articles={showing.articles} score={showing.score} onPick={pickStory} />
+
+            <div className="side-by-side">
+              <section aria-labelledby="history-title">
+                <h2 id="history-title">Daily readings</h2>
+                <Suspense fallback={<p className="quiet">Loading chart…</p>}>
+                  <History history={showing.history} />
+                </Suspense>
+              </section>
+              <section aria-labelledby="sources-title">
+                <h2 id="sources-title">By outlet</h2>
+                <ul className="outlets">
+                  {showing.sources.map((s) => (
+                    <li key={s.source}>
+                      <span className="outlet-name">{s.source}</span>
+                      <span className="outlet-bar" aria-hidden="true">
+                        <span
+                          className={`t-bg-${tone(s.score)}`}
+                          style={{
+                            left: s.score >= 0 ? '50%' : `${50 + s.score / 2}%`,
+                            width: `${Math.max(1.5, Math.abs(s.score) / 2)}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="outlet-num">
+                        {signed(s.score)} <small>({s.count})</small>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+
+            <Headlines articles={showing.articles} breakdown={showing.breakdown} picked={picked} />
           </div>
         )}
+      </main>
 
-        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#adb5bd", fontWeight: 600 }}>
-           RESEARCH TOOL • NOT FINANCIAL ADVICE
-        </div>
-      </div>
+      <footer className="foot">
+        <p>
+          Market Mood reads recent headlines and summaries, scores each one, and weights newer and
+          more widely reported stories higher. It measures how the coverage sounds, not where prices
+          will go. Nothing here is financial advice.
+        </p>
+      </footer>
+    </div>
+  )
+}
+
+function Skeleton() {
+  return (
+    <div className="skeleton" aria-label="Loading">
+      <span style={{ width: '30%' }} />
+      <span className="big" style={{ width: '55%' }} />
+      <span style={{ width: '70%' }} />
+      <span className="block" />
     </div>
   )
 }

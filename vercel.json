@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "cd sentiment_frontend/web_front && npm ci",
+  "buildCommand": "cd sentiment_frontend/web_front && npm run build",
+  "outputDirectory": "sentiment_frontend/web_front/dist",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{sentiment_frontend/**,analysis.ipynb,**/__pycache__/**}"
+    }
+  },
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index" }]
+}
