@@ -1,19 +1,13 @@
-
 .env
-
+.env.*
+!.env.example
+.vercel/
 
 __pycache__/
 *.pyc
 *.pyo
-
-
 .ipynb_checkpoints/
 
-
 node_modules/
-
-
 dist/
-
-
 .vscode/
